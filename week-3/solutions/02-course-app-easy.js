@@ -38,7 +38,7 @@ app.post('/admin/signup', (req, res) => {
     ADMINS.push(admin);
     res.json({ message: 'Admin created successfully' });
   }
-});
+}); 
 
 app.post('/admin/login', adminAuthentication, (req, res) => {
   res.json({ message: 'Logged in successfully' });
