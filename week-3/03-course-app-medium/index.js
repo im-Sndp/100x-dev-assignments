@@ -1,15 +1,28 @@
 const express = require('express');
+const bodyParser  = require('body-parser');
+const fs = require('fs');
+const { error } = require('console');
+
 const app = express();
 
 app.use(express.json());
+app.use(bodyParser.json());
 
-let ADMINS = [];
-let USERS = [];
-let COURSES = [];
+let ADMINS = "./databse/admins.json";
+let USERS = "./databse/users.json";
+let COURSES = "./databse/courses.json";
 
 // Admin routes
 app.post('/admin/signup', (req, res) => {
   // logic to sign up admin
+  fs.readFile(ADMINS,'utf-8',(error,data)=>{
+    if(error){
+      res.status(403).json({message:"Error reading the file."})
+    }
+    else{
+      res.status(200).json({data:data})
+    }
+  })
 });
 
 app.post('/admin/login', (req, res) => {
