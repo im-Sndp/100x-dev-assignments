@@ -1,212 +1,157 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const jwt = require('jsonwebtoken')
-
+const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const cors = require('cors')
 const app = express();
-
+app.use(cors());
 app.use(express.json());
-app.use(bodyParser.json())
 
 let ADMINS = [];
 let USERS = [];
 let COURSES = [];
-const secretKey = "MY_SECRET_KEY"
 
-const adminAuthentication = (req,res,next)=>{
-  var token = req.headers.token;
-  var check = true;
-  jwt.verify(token,secretKey,(error,data)=>{
-    if(error){
-      res.status(403).json({message:"Invalid token"})
-    }
-    else{
-      ADMINS.forEach((admin)=>{
-        if (admin.username == data.username){
-          check = false;
-          next();
-        }
-      })
-    }
-  })
-  if(check){
-    res.status(403).json({message:"Invalid login token"})
+// Read data from file, or initialize to empty array if file does not exist
+try {
+    ADMINS = JSON.parse(fs.readFileSync('admins.json', 'utf8'));
+    USERS = JSON.parse(fs.readFileSync('users.json', 'utf8'));
+    COURSES = JSON.parse(fs.readFileSync('courses.json', 'utf8'));
+} catch {
+    ADMINS = [];
+    USERS = [];
+    COURSES = [];
+}
+console.log(ADMINS);
+
+const SECRET = 'my-secret-key';
+
+const authenticateJwt = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    const token = authHeader.split(' ')[1];
+    jwt.verify(token, SECRET, (err, user) => {
+      if (err) {
+        return res.sendStatus(403);
+      }
+      req.user = user;
+      next();
+    });
+  } else {
+    res.sendStatus(401);
   }
-}
-
-const userAuthentication = (req,res,next)=>{
-  var token = req.headers.token;
-  jwt.verify(token,secretKey,(error,data)=>{
-    if(error){
-      res.status(403).json({message:"Error while validation token"})
-    }
-    else{
-      var check = true;
-      USERS.forEach((user)=>{
-        if(user.username == data.username){
-          check = false;
-          next();
-        }
-      })
-      res.status(403).json({message:"User not  found"})
-    }
-  })
-}
+};
 
 // Admin routes
 app.post('/admin/signup', (req, res) => {
-  // logic to sign up admin
-  const {username , password} = req.headers;
-  var check = true;
-  
-  ADMINS.forEach((admin)=>{
-    if(admin.username == username){
-      res.status(403).json({message:"Admin already  exist"})
-      check = false;
-    }
-  })
-
-  if (check){
-    var data = {username : username,password : password}
-    ADMINS.push(data)
-    var token = jwt.sign({username:username},secretKey)
-    res.status(200).json({message:"Login successful",token : token})
+  const { username, password } = req.body;
+  const admin = ADMINS.find(a => a.username === username);
+  console.log("admin signup");
+  if (admin) {
+    res.status(403).json({ message: 'Admin already exists' });
+  } else {
+    const newAdmin = { username, password };
+    ADMINS.push(newAdmin);
+    fs.writeFileSync('admins.json', JSON.stringify(ADMINS));
+    const token = jwt.sign({ username, role: 'admin' }, SECRET, { expiresIn: '1h' });
+    res.json({ message: 'Admin created successfully', token });
   }
 });
-
 
 app.post('/admin/login', (req, res) => {
-  // logic to log in admin
-  var {username , password} = req.headers;
-  var check = true;
-  ADMINS.forEach((admin)=>{
-    if (admin.username == username && admin.password == password){
-      var token = jwt.sign({username:username},secretKey)
-      check  = false;
-      res.status(200).json({message:"Login successful", token : token })
-    }
+  const { username, password } = req.headers;
+  const admin = ADMINS.find(a => a.username === username && a.password === password);
+  if (admin) {
+    const token = jwt.sign({ username, role: 'admin' }, SECRET, { expiresIn: '1h' });
+    res.json({ message: 'Logged in successfully', token });
+  } else {
+    res.status(403).json({ message: 'Invalid username or password' });
+  }
+});
+
+app.get('/admin/me', authenticateJwt , (req,res)=>{
+  res.json({
+    username : req.user.username
   })
-  if  (check){
-    res.status(200).json({message:"Invalid credentials."})
+})
+
+app.post('/admin/courses', authenticateJwt, (req, res) => {
+  const course = req.body;
+  course.id = COURSES.length + 1;
+  COURSES.push(course);
+  fs.writeFileSync('courses.json', JSON.stringify(COURSES));
+  res.json({ message: 'Course created successfully', courseId: course.id });
+});
+
+app.put('/admin/courses/:courseId', authenticateJwt, (req, res) => {
+  const course = COURSES.find(c => c.id === parseInt(req.params.courseId));
+  if (course) {
+    Object.assign(course, req.body);
+    fs.writeFileSync('courses.json', JSON.stringify(COURSES));
+    res.json({ message: 'Course updated successfully' });
+  } else {
+    res.status(404).json({ message: 'Course not found' });
   }
 });
 
-app.post('/admin/courses', adminAuthentication , (req, res) => {
-  // logic to create a course
-  var course = req.body;
-  course.id = Date.now();
-  COURSES.push(course)
-  res.status(200).json({message: "Course created successfully", id : course.id})
-});
-
-app.put('/admin/courses/:courseId', adminAuthentication ,(req, res) => {
-  // logic to edit a course
-  var courseId = req.params.courseId;
-  var check = false;
-  var i = 0;
-  COURSES.forEach((course)=>{
-    if (course.id == courseId){
-      COURSES[i] = req.body;
-      COURSES[i].id = courseId;
-      check = true;
-    }
-    i+=1
-  })
-
-  if (check){
-    res.status(200).json({message:"Course updated successfully"})
-  }
-  else{
-    res.status(403).json({message:"Invalid course id"})
-  }
-});
-
-app.get('/admin/courses', adminAuthentication ,(req, res) => {
-  // logic to get all courses
-  res.status(200).json({courses:COURSES})
+app.get('/admin/courses', authenticateJwt, (req, res) => {
+  res.json({ courses: COURSES });
 });
 
 // User routes
 app.post('/users/signup', (req, res) => {
-  // logic to sign up user
-  var {username,password} = req.body;
-  var check = true;
-  USERS.forEach((user)=>{
-    if(user.username == username){
-      check = false;
-    }
-  })
-
-  if(check){
-    user = {
-      username : username,
-      password : password,
-      purchasedCourses : []
-    }
-    USERS.push(user);
-    var token = jwt.sign({username:username},secretKey) 
-    res.status(200).json({message:"Sign up successful.",token : token})
-  }
-  else{
-    res.status(403).json({message:"User already exist"})
+  const { username, password } = req.body;
+  const user = USERS.find(u => u.username === username);
+  if (user) {
+    res.status(403).json({ message: 'User already exists' });
+  } else {
+    const newUser = { username, password };
+    USERS.push(newUser);
+    fs.writeFileSync('users.json', JSON.stringify(USERS));
+    const token = jwt.sign({ username, role: 'user' }, SECRET, { expiresIn: '1h' });
+    res.json({ message: 'User created successfully', token });
   }
 });
 
 app.post('/users/login', (req, res) => {
-  // logic to log in user
-  var {username , password} = req.headers;
-  var check = true;
-  USERS.forEach((user)=>{
-    if (user.username  == username && user.password == password){
-      var token = jwt.sign({username:username},secretKey)
-      check = false;
-      res.status(200).json({message:"Login successful",token:token})
-    }
-  })
-  if (check){
-    req.status(403).json({message:"Invalid credentials."})
+  const { username, password } = req.headers;
+  const user = USERS.find(u => u.username === username && u.password === password);
+  if (user) {
+    const token = jwt.sign({ username, role: 'user' }, SECRET, { expiresIn: '1h' });
+    res.json({ message: 'Logged in successfully', token });
+  } else {
+    res.status(403).json({ message: 'Invalid username or password' });
   }
 });
 
-app.get('/users/courses', userAuthentication  ,(req, res) => {
-  // logic to list all courses
-  res.status(200).json({courses:COURSES})
+app.get('/users/courses', authenticateJwt, (req, res) => {
+  res.json({ courses: COURSES });
 });
 
-app.post('/users/courses/:courseId', userAuthentication ,(req, res) => {
-  // logic to purchase a course
-  var courseId = req.params.courseId;
-  var username = jwt.verify(req.headers.token,secretKey).username
-  var check = false;
-  COURSES.forEach((course)=>{
-    if(course.id == courseId){
-      var i = 0;
-      USERS.forEach((user)=>{
-        if(user.username == username){
-          USERS[i].purchasedCourses.push(course)
-          check =true;
-        }
-        i+=1;
-      })
+app.post('/users/courses/:courseId', authenticateJwt, (req, res) => {
+  const course = COURSES.find(c => c.id === parseInt(req.params.courseId));
+  if (course) {
+    const user = USERS.find(u => u.username === req.user.username);
+    if (user) {
+      if (!user.purchasedCourses) {
+        user.purchasedCourses = [];
+      }
+      user.purchasedCourses.push(course);
+      fs.writeFileSync('users.json', JSON.stringify(USERS));
+      res.json({ message: 'Course purchased successfully' });
+    } else {
+      res.status(403).json({ message: 'User not found' });
     }
-  })
-  if (check){
-    res.status(200).json({message:"Course purchased successful"})
-  }
-  else{
-    res.status(403).json({message:"Course id not valid"})
+  } else {
+    res.status(404).json({ message: 'Course not found' });
   }
 });
 
-app.get('/users/purchasedCourses', userAuthentication , (req, res) => {
-  // logic to view purchased courses
-  var username = jwt.verify(req.headers.token,secretKey).username;
-  USERS.forEach((user)=>{
-    if(user.username == username){
-      res.status(200).json({courses:user.purchasedCourses})
-    }
-  })
+app.get('/users/purchasedCourses', authenticateJwt, (req, res) => {
+  const user = USERS.find(u => u.username === req.user.username);
+  if (user) {
+    res.json({ purchasedCourses: user.purchasedCourses || [] });
+  } else {
+    res.status(403).json({ message: 'User not found' });
+  }
 });
 
-app.listen(3000, () => {
-  console.log('Server is listening on port 3000');
-});
+app.listen(3000, () => console.log('Server running on port 3000'));
